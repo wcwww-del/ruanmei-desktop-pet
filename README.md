@@ -6,11 +6,11 @@
 
 > 这是独立的 macOS 原生应用，不是浏览器插件。浏览器/网页插件无法把内容覆盖到「所有应用」之上，只有原生窗口（`NSPanel`）才能做到。
 
-> 本仓库基于 **v3.4 发布快照**，并已更新到 v3.5 源码；Releases 里的最新安装包仍为 v3.4。原始录屏和未处理立绘未随仓库提供。
+> 本仓库已更新到 **v3.5**，包含源码、构建脚本、处理后的形象/眨眼/语音资源与预览；Releases 提供最新安装包。原始录屏和未处理立绘未随仓库提供。
 
 ## 下载
 
-- [GitHub Releases](https://github.com/wcwww-del/ruanmei-desktop-pet/releases/latest) 下载 `RuanMeiPet-v3.4-macOS.zip`（macOS 13+，Apple Silicon）
+- [GitHub Releases](https://github.com/wcwww-del/ruanmei-desktop-pet/releases/latest) 下载 `RuanMeiPet-v3.5-macOS.zip`（macOS 13+，Apple Silicon）
 - 解压后双击 `阮·梅桌宠.app`；首次打开如被 Gatekeeper 拦截，右键 →「打开」
 - 也可以 clone 仓库后运行 `./build.sh` 自行构建
 
