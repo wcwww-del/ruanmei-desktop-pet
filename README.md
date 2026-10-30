@@ -10,7 +10,7 @@
 
 ## 下载
 
-- [GitHub Releases](https://github.com/wcwww-del/ruanmei-desktop-pet/releases/latest) 下载 `阮·梅桌宠-macOS.zip`（macOS 13+，Apple Silicon）
+- [GitHub Releases](https://github.com/wcwww-del/ruanmei-desktop-pet/releases/latest) 下载 `RuanMeiPet-v3.4-macOS.zip`（macOS 13+，Apple Silicon）
 - 解压后双击 `阮·梅桌宠.app`；首次打开如被 Gatekeeper 拦截，右键 →「打开」
 - 也可以 clone 仓库后运行 `./build.sh` 自行构建
 
