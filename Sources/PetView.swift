@@ -43,6 +43,19 @@ final class PetView: NSView {
     private var nextPetalAt: CGFloat = 0.8
     private var nextSparkleAt: CGFloat = 3.0
 
+    /// 梅花飘落开关。关闭时立刻清掉还在飘的花瓣，打开后很快重新飘起来。
+    var petalsEnabled = true {
+        didSet {
+            guard petalsEnabled != oldValue else { return }
+            if petalsEnabled {
+                nextPetalAt = time + 0.5
+            } else {
+                particles.removeAll { $0.kind == .petal }
+                needsDisplay = true
+            }
+        }
+    }
+
     // MARK: 气泡
 
     private struct Bubble {
@@ -266,7 +279,7 @@ final class PetView: NSView {
         }
 
         // 花瓣
-        if time > nextPetalAt {
+        if petalsEnabled && time > nextPetalAt {
             spawnPetal()
             nextPetalAt = time + CGFloat.random(in: 0.75...1.9)
         }

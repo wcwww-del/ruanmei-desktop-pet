@@ -23,6 +23,7 @@ final class PetController: NSObject, NSMenuDelegate {
     private var quietHours = false
     private var alwaysOnTop = true
     private var voiceEnabled = true
+    private var petalsEnabled = true
     private var petHidden = false
     private var cursorInside = false
 
@@ -36,6 +37,7 @@ final class PetController: NSObject, NSMenuDelegate {
         panel = PetPanel(contentRect: NSRect(origin: .zero, size: size))
         petView = PetView(effects: assets)
         petView.petSize = petSize
+        petView.petalsEnabled = petalsEnabled
         petView.controller = self
         panel.contentView = petView
         voice = assets.voiceURL.flatMap { NSSound(contentsOf: $0, byReference: true) }
@@ -85,6 +87,9 @@ final class PetController: NSObject, NSMenuDelegate {
         }
         if defaults.object(forKey: "pet.voiceEnabled") != nil {
             voiceEnabled = defaults.bool(forKey: "pet.voiceEnabled")
+        }
+        if defaults.object(forKey: "pet.petalsEnabled") != nil {
+            petalsEnabled = defaults.bool(forKey: "pet.petalsEnabled")
         }
     }
 
@@ -333,6 +338,8 @@ final class PetController: NSObject, NSMenuDelegate {
         quiet.tag = 101
         let voiceItem = addItem("语音", action: #selector(toggleVoiceAction), key: "")
         voiceItem.tag = 104
+        let petalItem = addItem("梅花飘落", action: #selector(togglePetalsAction), key: "")
+        petalItem.tag = 105
         menu.addItem(NSMenuItem.separator())
 
         let sizeItem = NSMenuItem(title: "大小", action: nil, keyEquivalent: "")
@@ -376,6 +383,7 @@ final class PetController: NSObject, NSMenuDelegate {
             case 101: item.state = quietHours ? .on : .off
             case 102: item.state = alwaysOnTop ? .on : .off
             case 104: item.state = voiceEnabled ? .on : .off
+            case 105: item.state = petalsEnabled ? .on : .off
             case 103:
                 item.title = petHidden ? "显示桌宠" : "隐藏桌宠"
                 item.state = .off
@@ -410,6 +418,14 @@ final class PetController: NSObject, NSMenuDelegate {
         if !voiceEnabled { stopAllVoices() }
         refreshMenuStates()
         petView.showBubble(voiceEnabled ? "语音已开启" : "语音已关闭", duration: 2.8)
+    }
+
+    @objc private func togglePetalsAction() {
+        petalsEnabled.toggle()
+        petView.petalsEnabled = petalsEnabled
+        defaults.set(petalsEnabled, forKey: "pet.petalsEnabled")
+        refreshMenuStates()
+        petView.showBubble(petalsEnabled ? "梅花飘落：已开启" : "梅花飘落：已关闭", duration: 2.8)
     }
 
     @objc private func toggleRemindersAction() {
@@ -484,12 +500,13 @@ final class PetController: NSObject, NSMenuDelegate {
         · 单击会有回应，双击试试看
         · 右键打开菜单
         · 菜单栏的水滴图标里可以调整大小、开关整点提醒
-        · 会呼吸、眨眼、飘落花瓣
+        · 会呼吸、眨眼、飘落梅花（可开关）
         · 拖动结束、点击时会说不同的话
         · 每到整点，她弹文字气泡并播放语音，提醒你喝水
         · 透明区域不会挡住其他窗口的点击
 
         关闭提醒：菜单栏水滴 → 整点喝水提醒
+        关闭梅花：菜单栏水滴 → 梅花飘落
         """
         alert.addButton(withTitle: "好")
         alert.runModal()
