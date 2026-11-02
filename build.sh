@@ -33,7 +33,13 @@ cp assets/ruanmei_click3.m4a "$APP/Contents/Resources/"
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
-echo "==> 临时签名"
-codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 || true
+echo "==> 签名（Hardened Runtime + 最小权限）"
+codesign --force --sign - \
+    --options runtime \
+    --timestamp=none \
+    --entitlements Entitlements.plist \
+    "$APP"
+codesign --verify --strict "$APP"
+echo "    签名校验通过：$(codesign -dv "$APP" 2>&1 | grep -E '^(Identifier|TeamIdentifier|Runtime Version)' | tr '\n' ' ')"
 
 echo "==> 完成：$APP"

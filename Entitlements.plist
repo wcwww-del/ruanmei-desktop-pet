@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  阮·梅桌宠的权限清单。
+
+  应用只做三件事：画窗口、播本地音频、读写自己的 UserDefaults，
+  因此不需要任何额外权限（不联网、不访问麦克风/摄像头、不发 Apple 事件、
+  不加载第三方库），这里保持空字典，配合 build.sh 里的 Hardened Runtime 签名。
+  不要在没搞清用途前给这里加 entitlement。
+-->
+<dict/>
+</plist>

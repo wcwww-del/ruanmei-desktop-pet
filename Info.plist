@@ -17,16 +17,22 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>3.6</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>36</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
+    <!-- 同时只允许一个实例，避免两只桌宠抢位置、重复提醒、能耗翻倍 -->
+    <key>LSMultipleInstancesProhibited</key>
+    <true/>
     <key>NSHighResolutionCapable</key>
+    <true/>
+    <!-- 双显卡机型上优先使用集成显卡 -->
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Personal desktop pet. Character © HoYoverse.</string>

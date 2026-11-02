@@ -32,6 +32,34 @@ struct Spring {
     }
 }
 
+/// 把弹簧物理一次性算成关键帧，交回给 Core Animation 播放，避免逐帧驱动。
+enum PetCurves {
+    static func springSamples(from: CGFloat,
+                              velocity: CGFloat,
+                              target: CGFloat,
+                              stiffness: CGFloat,
+                              damping: CGFloat,
+                              duration: CGFloat,
+                              fps: CGFloat = 30) -> [CGFloat] {
+        var spring = Spring(value: from, velocity: velocity, target: target)
+        let dt: CGFloat = 1.0 / 120.0
+        let sampleStep = 1.0 / max(1, fps)
+        var nextSample = sampleStep
+        var elapsed: CGFloat = 0
+        var samples: [CGFloat] = [from]
+        while elapsed < duration {
+            spring.step(dt, stiffness: stiffness, damping: damping)
+            elapsed += dt
+            if elapsed >= nextSample {
+                nextSample += sampleStep
+                samples.append(spring.value)
+            }
+        }
+        samples.append(target)
+        return samples
+    }
+}
+
 enum Palette {
     static let mint = NSColor(srgbRed: 0.56, green: 0.87, blue: 0.81, alpha: 1)
     static let water = NSColor(srgbRed: 0.32, green: 0.75, blue: 0.92, alpha: 1)

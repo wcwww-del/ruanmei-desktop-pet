@@ -6,11 +6,11 @@
 
 > 这是独立的 macOS 原生应用，不是浏览器插件。浏览器/网页插件无法把内容覆盖到「所有应用」之上，只有原生窗口（`NSPanel`）才能做到。
 
-> 本仓库已更新到 **v3.5**，包含源码、构建脚本、处理后的形象/眨眼/语音资源与预览；Releases 提供最新安装包。原始录屏和未处理立绘未随仓库提供。
+> 本仓库已更新到 **v3.6**，包含源码、构建脚本、处理后的形象/眨眼/语音资源与预览；Releases 提供最新安装包。原始录屏和未处理立绘未随仓库提供。
 
 ## 下载
 
-- [GitHub Releases](https://github.com/wcwww-del/ruanmei-desktop-pet/releases/latest) 下载 `RuanMeiPet-v3.5-macOS.zip`（macOS 13+，Apple Silicon）
+- [GitHub Releases](https://github.com/wcwww-del/ruanmei-desktop-pet/releases/latest) 下载最新的 `RuanMeiPet-*-macOS.zip`（macOS 13+，Apple Silicon）
 - 解压后双击 `阮·梅桌宠.app`；首次打开如被 Gatekeeper 拦截，右键 →「打开」
 - 也可以 clone 仓库后运行 `./build.sh` 自行构建
 
@@ -26,7 +26,36 @@ open "dist/阮·梅桌宠.app"
 
 启动后没有 Dock 图标，控制入口在**菜单栏右上角的水滴图标**，右键阮·梅也能打开同一个菜单。
 
-## v3.5 更新（当前版本）
+## v3.6 更新（当前版本）
+
+这一版只做两件事：**把能耗降下来，把安全补上去**。
+
+### 能耗：活动监视器里从「几十 %」回到「约 0%」
+
+- 渲染方式整个换掉：不再每 1/60 秒重绘一次整块视图，而是启动时把形象、投影、光环、眼睛叠加层、花瓣、气泡一次性烘焙成位图，之后交给 Core Animation 合成。呼吸、浮动、摇摆、光环脉动都是 GPU 上的循环动画，空闲时主线程完全休眠（不再有 60Hz 主循环，也不再每帧重建渐变和贝塞尔路径）。
+- 眨眼、飘花、星光改成单次定时器；花瓣和星光的运动轨迹在生成时一次算完，播放同样交给 CA。
+- 整点提醒不再每秒对时，而是只在下一个整点挂一个单次 Timer。
+- 鼠标穿透检测从固定 30Hz 改成按距离分级：指针压在宠物身上时交给窗口事件，远处 1Hz、中距 6Hz、近处 20Hz。
+- 窗口被遮挡、屏幕休眠、选择「隐藏桌宠」时自动暂停动画与定时器；双显卡机型优先使用集成显卡。
+- 新增「低耗电模式（静止）」：停掉呼吸 / 摇摆 / 花瓣，只保留静帧与眨眼。
+
+实测（230pt、梅花飘落开启）：进程 CPU 从 **27–48%** 降到 **0.0–0.1%**（15 秒内累计 CPU 时间 0.02 秒），空闲唤醒从约 90 次/秒降到 1–2 次/秒。
+
+### 安全
+
+- **Hardened Runtime 签名**：`build.sh` 现在用 `--options runtime` 加最小化的 `Entitlements.plist` 签名，并当场校验签名。
+- **素材白名单式校验**：自定义形象 / 语音只有在「属于当前用户、不是符号链接、组和其他人不可写、体积与像素尺寸不超上限」时才会被加载；图片交给 ImageIO 判断真实格式（最大 4096×4096、1600 万像素），语音只接受 ISO-BMFF 容器并整段读入内存。
+- **不再从工作目录加载素材**：旧版本会尝试读 `./assets`，从不可信目录启动时可能加载到别人的素材；现在只认 App 包内资源或 `~/Library/Application Support/RuanMeiPet`，开发调试需显式设置 `RUANMEI_DEV_ASSETS=1`。
+- **单实例**：`LSMultipleInstancesProhibited`，避免两只桌宠抢位置、重复提醒、能耗翻倍。
+- **资源上限**：同屏粒子最多 96 个、单次爆发最多 24 个；气泡文案最长 400 字、显示时长 0.6–120 秒，不会因为异常输入无限膨胀。
+- **崩溃面收敛**：去掉强制解包，校验保存的位置字符串（NaN / Inf / 超大值回退到默认位置），退出时失效全部定时器，通知观察者成对注销。
+- 被拒绝的自定义素材会在启动几秒后用气泡提示，而不是静默失败。
+
+### 说明
+
+- 没有开启 App Sandbox：开启后 `~/Library/Application Support/RuanMeiPet` 会迁移到容器目录，现有的「放一张 PNG 换形象」用法会失效。当前用 Hardened Runtime + 素材校验替代。
+
+## v3.5 更新
 
 - 新增「梅花飘落」开关（菜单栏水滴 →「梅花飘落」，右键菜单同）。
 - 关闭后立即清掉还在飘的梅花，之后不再生成；重新打开约半秒后恢复飘落。
@@ -78,7 +107,7 @@ open "dist/阮·梅桌宠.app"
 | 1 秒内连点 3 次及以上 | 说「离我远点。」（点击语音 3） |
 | 右键 | 打开菜单 |
 | 点击气泡 | 关闭气泡 |
-| 菜单栏水滴 | 大小 / 整点提醒 / 夜间免打扰 / 语音（总开关） / 梅花飘落 / 始终置顶 / 隐藏 / 重置位置 / 退出 |
+| 菜单栏水滴 | 大小 / 整点提醒 / 夜间免打扰 / 语音（总开关） / 梅花飘落 / 低耗电模式 / 始终置顶 / 隐藏 / 重置位置 / 退出 |
 
 透明区域不会拦截鼠标，不会挡住下面窗口的点击。
 
@@ -129,7 +158,8 @@ python3 tools/make_effects.py       # 眨眼叠加层、柔和投影
 
 - 需要 Xcode Command Line Tools（`swiftc`、`iconutil`）
 - 目标：macOS 13+，当前为 Apple Silicon（arm64）
-- ad-hoc 签名，只在本机使用；拷到别的 Mac 如被拦截，右键 →「打开」
+- 签名：ad-hoc + **Hardened Runtime**（`codesign --options runtime --entitlements Entitlements.plist`），权限清单为空；构建脚本会 `codesign --verify --strict` 自检
+- 只在本机使用；拷到别的 Mac 如被拦截，右键 →「打开」
 
 ## 目录结构
 
@@ -145,11 +175,13 @@ assets/ruanmei_click1.m4a     点击语音 1（5.21s）
 assets/ruanmei_click2.m4a     点击语音 2（3.23s）
 assets/ruanmei_click3.m4a     点击语音 3（2.75s）
 Sources/                      原生 AppKit 源码
-  PetView.swift               动画、眨眼、粒子、气泡、拖拽
-  PetEffects.swift            形象与眨眼/阴影资源加载
+  PetView.swift               Core Animation 图层、眨眼、粒子、气泡、拖拽
+  PetImages.swift             启动时把各图层烘焙成位图
+  PetEffects.swift            形象与眨眼/阴影资源加载（带安全校验）
+  Security.swift              素材 / 文本 / 坐标 / 限额校验
   PetController.swift         窗口、菜单栏、提醒、位置记忆、语音
   PetPanel.swift              透明置顶面板
-  ReminderScheduler.swift     整点调度
+  ReminderScheduler.swift     整点单次定时调度
   Support.swift / Snapshot.swift
 tools/                        资产生成脚本
 dist/                         本地构建产物（不随仓库提交）
@@ -168,9 +200,12 @@ docs/preview.png              效果预览（真实运行截图合成）
 - `v3.3`：移动结束语音 + 点击 1/2/3 分级语音，气泡与语音一致。
 - `v3.4`：菜单标题改为「阮·梅桌宠」；删除试听项；新增全局语音开关。
 - `v3.5`：新增「梅花飘落」开关，状态记忆。
+- `v3.6`：渲染改为 Core Animation 合成，空闲 CPU 从约 27–48% 降到约 0.1%；新增「低耗电模式」；Hardened Runtime 签名、素材安全校验与单实例保护。
 
 ## 已知边界
 
+- 未开启 App Sandbox（见 v3.6 说明）；素材读取范围靠白名单校验约束
+- 自定义形象必须是当前用户拥有、组/其他人不可写的普通文件，否则会被拒绝并提示
 - 锁屏/登录窗口之上不会显示（系统安全限制）
 - 通知气泡由应用自身绘制，不经过通知中心；不需要通知权限
 - 整点提示在系统睡眠期间不会补发；唤醒后从下一个整点继续

@@ -13,7 +13,16 @@ final class PetController: NSObject, NSMenuDelegate {
     private var greetVoice: NSSound?
     private var moveVoice: NSSound?
     private var clickVoices: [NSSound] = []
+
+    // MARK: 轮询 / 场景状态
+
     private var hitTimer: Timer?
+    private var hitInterval: TimeInterval = 0
+    private var pointerInside = false
+    private var scenePaused = false
+    private var systemAsleep = false
+    private var observers: [NSObjectProtocol] = []
+    private var workspaceObservers: [NSObjectProtocol] = []
 
     // MARK: 设置
 
@@ -24,8 +33,8 @@ final class PetController: NSObject, NSMenuDelegate {
     private var alwaysOnTop = true
     private var voiceEnabled = true
     private var petalsEnabled = true
+    private var lowPower = false
     private var petHidden = false
-    private var cursorInside = false
 
     // MARK: 生命周期
 
@@ -38,15 +47,17 @@ final class PetController: NSObject, NSMenuDelegate {
         petView = PetView(effects: assets)
         petView.petSize = petSize
         petView.petalsEnabled = petalsEnabled
+        petView.lowPower = lowPower
         petView.controller = self
         panel.contentView = petView
-        voice = assets.voiceURL.flatMap { NSSound(contentsOf: $0, byReference: true) }
+
+        voice = assets.voiceURL.flatMap { PetSecurity.sound(at: $0) }
         voice?.volume = 0.9
-        greetVoice = assets.greetVoiceURL.flatMap { NSSound(contentsOf: $0, byReference: true) }
+        greetVoice = assets.greetVoiceURL.flatMap { PetSecurity.sound(at: $0) }
         greetVoice?.volume = 0.9
-        moveVoice = assets.moveVoiceURL.flatMap { NSSound(contentsOf: $0, byReference: true) }
+        moveVoice = assets.moveVoiceURL.flatMap { PetSecurity.sound(at: $0) }
         moveVoice?.volume = 0.9
-        clickVoices = assets.clickVoiceURLs.compactMap { NSSound(contentsOf: $0, byReference: true) }
+        clickVoices = assets.clickVoiceURLs.compactMap { PetSecurity.sound(at: $0) }
         clickVoices.forEach { $0.volume = 0.9 }
 
         restorePosition()
@@ -56,18 +67,19 @@ final class PetController: NSObject, NSMenuDelegate {
         setupStatusItem()
         setupReminders()
         startHitTesting()
+        registerObservers()
 
-
-
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(screensChanged),
-                                               name: NSApplication.didChangeScreenParametersNotification,
-                                               object: nil)
+        if let warning = assets.warnings.first {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { [weak self] in
+                self?.petView.showBubble(warning, duration: 7)
+            }
+        }
     }
 
     deinit {
         hitTimer?.invalidate()
-        NotificationCenter.default.removeObserver(self)
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
     }
 
     // MARK: 设置读写
@@ -91,6 +103,9 @@ final class PetController: NSObject, NSMenuDelegate {
         if defaults.object(forKey: "pet.petalsEnabled") != nil {
             petalsEnabled = defaults.bool(forKey: "pet.petalsEnabled")
         }
+        if defaults.object(forKey: "pet.lowPower") != nil {
+            lowPower = defaults.bool(forKey: "pet.lowPower")
+        }
     }
 
     private func windowSize(pet: CGFloat) -> NSSize {
@@ -106,44 +121,39 @@ final class PetController: NSObject, NSMenuDelegate {
 
     private func restorePosition() {
         var origin: NSPoint?
-        if let s = defaults.string(forKey: "pet.origin") {
-            let parts = s.split(separator: ",")
-            if parts.count == 2, let x = Double(parts[0]), let y = Double(parts[1]) {
-                origin = NSPoint(x: x, y: y)
-            }
+        if let saved = defaults.string(forKey: "pet.origin") {
+            origin = PetSecurity.restoredPoint(saved)
         }
-        if origin == nil {
-            origin = defaultOrigin()
-        }
-        let p = clampOrigin(origin!)
-        panel.setFrameOrigin(p)
+        let point = clampOrigin(origin ?? defaultOrigin())
+        panel.setFrameOrigin(point)
     }
 
     private func defaultOrigin() -> NSPoint {
         let screen = NSScreen.main
-        let sf = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let frame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let size = petView.petSize
         let w = panel.frame.width
         let h = panel.frame.height
         let local = CGRect(x: (w - size) / 2, y: (h - size) / 2, width: size, height: size)
         // 宠物脚底距屏幕底部 96pt，靠右侧
-        return NSPoint(x: sf.maxX - 56 - local.maxX,
-                       y: sf.minY + 96 - local.minY)
+        return NSPoint(x: frame.maxX - 56 - local.maxX,
+                       y: frame.minY + 96 - local.minY)
     }
 
     /// 保证宠物本体（而不是透明窗口）留在屏幕内。
     private func clampOrigin(_ origin: NSPoint) -> NSPoint {
+        guard panel != nil, petView != nil else { return origin }
         let size = petView.petSize
         let w = panel.frame.width
         let h = panel.frame.height
         let local = CGRect(x: (w - size) / 2, y: (h - size) / 2, width: size, height: size)
         let petCenter = NSPoint(x: origin.x + w / 2, y: origin.y + h / 2)
         let screen = NSScreen.screens.first { $0.frame.contains(petCenter) } ?? NSScreen.main
-        guard let sf = screen?.visibleFrame else { return origin }
-        let minX = sf.minX + 4 - local.minX
-        let maxX = sf.maxX - 4 - local.maxX
-        let minY = sf.minY + 4 - local.minY
-        let maxY = sf.maxY - 4 - local.maxY
+        guard let visible = screen?.visibleFrame else { return origin }
+        let minX = visible.minX + 4 - local.minX
+        let maxX = visible.maxX - 4 - local.maxX
+        let minY = visible.minY + 4 - local.minY
+        let maxY = visible.maxY - 4 - local.maxY
         return NSPoint(x: clamp(origin.x, minX, maxX),
                        y: clamp(origin.y, minY, maxY))
     }
@@ -151,6 +161,7 @@ final class PetController: NSObject, NSMenuDelegate {
     func savePosition() {
         guard panel != nil else { return }
         let o = panel.frame.origin
+        guard o.x.isFinite, o.y.isFinite else { return }
         defaults.set(String(format: "%.1f,%.1f", o.x, o.y), forKey: "pet.origin")
     }
 
@@ -165,15 +176,103 @@ final class PetController: NSObject, NSMenuDelegate {
         panel.setFrameOrigin(clampOrigin(panel.frame.origin))
     }
 
+    // MARK: 场景暂停（休眠 / 遮挡 / 隐藏）
+
+    private func registerObservers() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                           object: nil, queue: .main) { [weak self] _ in
+            self?.screensChanged()
+        })
+        observers.append(center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification,
+                                           object: panel, queue: .main) { [weak self] _ in
+            self?.handleOcclusionChange()
+        })
+
+        let workspace = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.willSleepNotification] {
+            workspaceObservers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.systemAsleep = true
+                self?.setScenePaused(true)
+            })
+        }
+        for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
+            workspaceObservers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                self.systemAsleep = false
+                self.setScenePaused(false)
+                self.scheduler.reschedule()
+            })
+        }
+    }
+
+    private func handleOcclusionChange() {
+        guard panel != nil, !petHidden, !systemAsleep else { return }
+        if panel.occlusionState.contains(.visible) {
+            setScenePaused(false)
+        } else if panel.isVisible {
+            setScenePaused(true)
+        }
+    }
+
+    private func setScenePaused(_ paused: Bool) {
+        guard scenePaused != paused else { return }
+        scenePaused = paused
+        petView.setScenePaused(paused)
+        if paused {
+            hitTimer?.invalidate()
+            hitTimer = nil
+            panel.ignoresMouseEvents = true
+        } else {
+            startHitTesting()
+        }
+    }
+
     // MARK: 鼠标穿透 / 悬停
 
     private func startHitTesting() {
+        guard panel != nil, !scenePaused, !petHidden else { return }
+        pointerInside = false
+        scheduleHitTimer(interval: 1.0 / 6.0)
+    }
+
+    private func scheduleHitTimer(interval: TimeInterval) {
         hitTimer?.invalidate()
-        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.updateMouse()
+        hitInterval = interval
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.hitTick()
         }
-        RunLoop.main.add(t, forMode: .common)
-        hitTimer = t
+        timer.tolerance = interval * 0.35
+        RunLoop.main.add(timer, forMode: .common)
+        hitTimer = timer
+    }
+
+    private func hitTick() {
+        guard panel != nil, panel.isVisible, !scenePaused, !petHidden else { return }
+        updateMouse()
+        let wanted = desiredPollInterval()
+        if abs(wanted - hitInterval) > 0.001 { scheduleHitTimer(interval: wanted) }
+    }
+
+    /// 指针压在宠物身上时靠窗口事件驱动（保留 1 秒兜底），
+    /// 离开后按距离分级：近处 20Hz、中距 6Hz、远处 1Hz。
+    private func desiredPollInterval() -> TimeInterval {
+        if pointerInside { return 1.0 }
+        if petView.isDragging { return 1.0 / 30.0 }
+        let distance = cursorDistanceToPet()
+        if distance < 80 { return 1.0 / 20.0 }
+        if distance < 420 { return 1.0 / 6.0 }
+        return 1.0
+    }
+
+    private func cursorDistanceToPet() -> CGFloat {
+        guard panel != nil, petView != nil else { return .greatestFiniteMagnitude }
+        let windowPoint = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let local = petView.convert(windowPoint, from: nil)
+        let r = petView.petRect
+        let dx = max(max(r.minX - local.x, 0), local.x - r.maxX)
+        let dy = max(max(r.minY - local.y, 0), local.y - r.maxY)
+        return hypot(dx, dy)
     }
 
     private func updateMouse() {
@@ -186,27 +285,39 @@ final class PetController: NSObject, NSMenuDelegate {
         let windowPoint = panel.convertPoint(fromScreen: screenPoint)
         let local = petView.convert(windowPoint, from: nil)
         let inside = petView.acceptsPoint(local)
-        panel.ignoresMouseEvents = !inside
+        if panel.ignoresMouseEvents != !inside {
+            panel.ignoresMouseEvents = !inside
+        }
 
         if inside {
-            let wasInside = cursorInside
-            cursorInside = true
+            let wasInside = pointerInside
+            pointerInside = true
             petView.setHovering(true, cursor: local)
             if !wasInside { NSCursor.openHand.set() }
         } else {
-            if cursorInside {
-                cursorInside = false
+            if pointerInside {
+                pointerInside = false
                 NSCursor.arrow.set()
             }
             petView.setHovering(false, cursor: local)
         }
     }
 
+    /// 鼠标离开宠物视图：交还给桌面点击，并恢复快速轮询以便重新进入。
+    func petPointerLeft() {
+        pointerInside = false
+        if petView.isDragging { return }
+        panel.ignoresMouseEvents = true
+        NSCursor.arrow.set()
+        guard !scenePaused, !petHidden else { return }
+        scheduleHitTimer(interval: 1.0 / 20.0)
+    }
+
     // MARK: 拖拽回调
 
     func petDidBeginDrag() {
         panel.ignoresMouseEvents = false
-        cursorInside = false
+        pointerInside = false
         stopAllVoices()
     }
 
@@ -240,8 +351,9 @@ final class PetController: NSObject, NSMenuDelegate {
     }
 
     private func fireWaterReminder() {
-        guard panel.isVisible, !petHidden else { return }
+        guard panel != nil, panel.isVisible, !petHidden, !systemAsleep else { return }
         panel.orderFrontRegardless()
+        setScenePaused(false)
         petView.waterReminder()
         playVoice()
     }
@@ -278,7 +390,7 @@ final class PetController: NSObject, NSMenuDelegate {
     // MARK: 气泡 / 动作
 
     func showSpeech(_ text: String, duration: CGFloat = 5) {
-        guard panel.isVisible else { return }
+        guard panel != nil, panel.isVisible else { return }
         petView.showBubble(text, duration: duration)
     }
 
@@ -340,6 +452,8 @@ final class PetController: NSObject, NSMenuDelegate {
         voiceItem.tag = 104
         let petalItem = addItem("梅花飘落", action: #selector(togglePetalsAction), key: "")
         petalItem.tag = 105
+        let lowPowerItem = addItem("低耗电模式（静止）", action: #selector(toggleLowPowerAction), key: "")
+        lowPowerItem.tag = 106
         menu.addItem(NSMenuItem.separator())
 
         let sizeItem = NSMenuItem(title: "大小", action: nil, keyEquivalent: "")
@@ -384,6 +498,7 @@ final class PetController: NSObject, NSMenuDelegate {
             case 102: item.state = alwaysOnTop ? .on : .off
             case 104: item.state = voiceEnabled ? .on : .off
             case 105: item.state = petalsEnabled ? .on : .off
+            case 106: item.state = lowPower ? .on : .off
             case 103:
                 item.title = petHidden ? "显示桌宠" : "隐藏桌宠"
                 item.state = .off
@@ -428,6 +543,16 @@ final class PetController: NSObject, NSMenuDelegate {
         petView.showBubble(petalsEnabled ? "梅花飘落：已开启" : "梅花飘落：已关闭", duration: 2.8)
     }
 
+    @objc private func toggleLowPowerAction() {
+        lowPower.toggle()
+        petView.lowPower = lowPower
+        defaults.set(lowPower, forKey: "pet.lowPower")
+        refreshMenuStates()
+        petView.showBubble(lowPower ? "低耗电模式：只剩眨眼，几乎不耗电"
+                                    : "低耗电模式已关闭",
+                           duration: 3.2)
+    }
+
     @objc private func toggleRemindersAction() {
         remindersEnabled.toggle()
         scheduler.isEnabled = remindersEnabled
@@ -453,18 +578,18 @@ final class PetController: NSObject, NSMenuDelegate {
     private func setPetSize(_ newSize: CGFloat) {
         guard abs(newSize - petSize) > 0.5 else { return }
         let oldCenter = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
-        petSize = newSize
+        petSize = clamp(newSize, 180, 420)
         defaults.set(Double(newSize), forKey: "pet.sizeV2")
 
-        let s = windowSize(pet: newSize)
+        let s = windowSize(pet: petSize)
         let origin = NSPoint(x: oldCenter.x - s.width / 2,
                              y: oldCenter.y - s.height / 2)
-        petView.petSize = newSize
+        petView.petSize = petSize
         panel.setFrame(NSRect(origin: origin, size: s), display: true)
         panel.setFrameOrigin(clampOrigin(origin))
         savePosition()
         refreshMenuStates()
-        petView.showBubble("大小：\(Int(newSize)) pt", duration: 2.4)
+        petView.showBubble("大小：\(Int(petSize)) pt", duration: 2.4)
     }
 
     @objc private func toggleOnTopAction() {
@@ -484,9 +609,11 @@ final class PetController: NSObject, NSMenuDelegate {
         petHidden = hidden
         if hidden {
             panel.orderOut(nil)
+            setScenePaused(true)
         } else {
             panel.orderFrontRegardless()
             panel.ignoresMouseEvents = true
+            setScenePaused(false)
         }
         refreshMenuStates()
     }
@@ -507,6 +634,7 @@ final class PetController: NSObject, NSMenuDelegate {
 
         关闭提醒：菜单栏水滴 → 整点喝水提醒
         关闭梅花：菜单栏水滴 → 梅花飘落
+        最省电：菜单栏水滴 → 低耗电模式（静止）
         """
         alert.addButton(withTitle: "好")
         alert.runModal()
