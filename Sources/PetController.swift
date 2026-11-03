@@ -16,6 +16,11 @@ final class PetController: NSObject, NSMenuDelegate {
 
     // MARK: 轮询 / 场景状态
 
+    private var chatStore: ChatStore?
+    private var chatWindow: ChatWindowController?
+    private var settingsWindow: SettingsWindowController?
+    private var memoryWindow: MemoryWindowController?
+
     private var hitTimer: Timer?
     private var hitInterval: TimeInterval = 0
     private var pointerInside = false
@@ -39,6 +44,8 @@ final class PetController: NSObject, NSMenuDelegate {
     // MARK: 生命周期
 
     func start() {
+        ConfigStore.shared.load()
+        chatStore = PetPaths.databaseURL.flatMap { ChatStore(url: $0) }
         loadSettings()
 
         let assets = PetAssetLoader.load()
@@ -60,6 +67,11 @@ final class PetController: NSObject, NSMenuDelegate {
         clickVoices = assets.clickVoiceURLs.compactMap { PetSecurity.sound(at: $0) }
         clickVoices.forEach { $0.volume = 0.9 }
 
+        SpeechEngine.shared.configure(ConfigStore.shared.config.tts)
+        SpeechEngine.shared.onError = { [weak self] message in
+            self?.petView.showBubble(message, duration: 6)
+        }
+
         restorePosition()
         applyWindowLevel()
         panel.orderFrontRegardless()
@@ -72,6 +84,11 @@ final class PetController: NSObject, NSMenuDelegate {
         if let warning = assets.warnings.first {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { [weak self] in
                 self?.petView.showBubble(warning, duration: 7)
+            }
+        }
+        if let error = ConfigStore.shared.loadError {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                self?.petView.showBubble(error, duration: 8)
             }
         }
     }
@@ -440,6 +457,7 @@ final class PetController: NSObject, NSMenuDelegate {
         menu.addItem(header)
         menu.addItem(NSMenuItem.separator())
 
+        addItem("和阮·梅说话…", action: #selector(openChatAction), key: "")
         addItem("打个招呼", action: #selector(greetAction), key: "")
         addItem("现在提醒我喝水", action: #selector(remindNowAction), key: "")
         menu.addItem(NSMenuItem.separator())
@@ -474,6 +492,8 @@ final class PetController: NSObject, NSMenuDelegate {
 
         let hide = addItem("隐藏桌宠", action: #selector(toggleHiddenAction), key: "")
         hide.tag = 103
+        addItem("记忆…", action: #selector(openMemoryAction), key: "")
+        addItem("设置…", action: #selector(openSettingsAction), key: "")
         addItem("使用说明", action: #selector(helpAction), key: "")
         menu.addItem(NSMenuItem.separator())
         addItem("退出阮·梅", action: #selector(quitAction), key: "q")
@@ -616,6 +636,81 @@ final class PetController: NSObject, NSMenuDelegate {
             setScenePaused(false)
         }
         refreshMenuStates()
+    }
+
+    // MARK: 对话 / 记忆 / 设置
+
+    @objc private func openChatAction() { openChat() }
+    @objc private func openSettingsAction() { openSettings() }
+    @objc private func openMemoryAction() { openMemoryList() }
+
+    private func makeChatWindow() -> ChatWindowController {
+        if let chatWindow { return chatWindow }
+        let window = ChatWindowController(store: chatStore, avatar: petView.effects.pet)
+        window.onOpenSettings = { [weak self] in self?.openSettings() }
+        window.onOpenMemory = { [weak self] in self?.openMemoryList() }
+        window.onAssistantFinished = { [weak self] text in
+            guard let self else { return }
+            // 对话窗口不在前台时，把回复的第一句带回到桌宠气泡上。
+            if self.chatWindow?.window?.isKeyWindow != true {
+                self.petView.showBubble(Self.firstSentence(text), duration: 6)
+            }
+        }
+        chatWindow = window
+        return window
+    }
+
+    func openChat() {
+        makeChatWindow().open()
+    }
+
+    func openSettings() {
+        if settingsWindow == nil {
+            let window = SettingsWindowController(store: chatStore, effects: petView.effects)
+            window.onSave = { [weak self] in
+                self?.chatWindow?.reloadConfig()
+                SpeechEngine.shared.configure(ConfigStore.shared.config.tts)
+            }
+            settingsWindow = window
+        }
+        settingsWindow?.showWindow(nil)
+        settingsWindow?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func openMemoryList() {
+        if memoryWindow == nil {
+            let window = MemoryWindowController(store: chatStore)
+            window.onExtract = { [weak self] in self?.extractMemoriesNow() }
+            memoryWindow = window
+        }
+        memoryWindow?.reload()
+        memoryWindow?.showWindow(nil)
+        memoryWindow?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func extractMemoriesNow() {
+        // 即使对话窗口没打开过，也能用设置 / 记忆窗口里的「立即整理」。
+        makeChatWindow().extractMemoriesNow()
+    }
+
+    func refreshMemoryWindow() {
+        memoryWindow?.reload()
+    }
+
+    private static func firstSentence(_ text: String) -> String {
+        let limit = 80
+        for index in text.indices {
+            if "。！？!?\n".contains(text[index]) {
+                let sentence = String(text[...index]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !sentence.isEmpty {
+                    return sentence.count > limit ? String(sentence.prefix(limit)) + "…" : sentence
+                }
+            }
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count > limit ? String(trimmed.prefix(limit)) + "…" : trimmed
     }
 
     @objc private func helpAction() {
