@@ -71,6 +71,20 @@ enum PetKeychain {
 
 // MARK: - 配置
 
+enum ThinkingMode: String, Codable, CaseIterable {
+    case auto
+    case off
+    case on
+
+    var title: String {
+        switch self {
+        case .auto: return "自动（跟随服务默认）"
+        case .off: return "关闭（更快、更省）"
+        case .on: return "开启（更聪明、更慢）"
+        }
+    }
+}
+
 enum TTSProvider: String, Codable, CaseIterable {
     case system
     case openAICompatible
@@ -87,7 +101,8 @@ struct LLMConfig: Codable {
     var baseURL = ""
     var model = ""
     var temperature = 0.85
-    var maxTokens = 400
+    var maxTokens = 1600
+    var thinking: ThinkingMode = .auto
 
     init() {}
 
@@ -96,7 +111,8 @@ struct LLMConfig: Codable {
         baseURL = c.value(.baseURL, "")
         model = c.value(.model, "")
         temperature = c.value(.temperature, 0.85)
-        maxTokens = c.value(.maxTokens, 400)
+        maxTokens = c.value(.maxTokens, 1600)
+        thinking = c.value(.thinking, ThinkingMode.auto)
     }
 }
 

@@ -54,6 +54,7 @@ struct ChatRequestConfig {
     var model: String
     var temperature: Double
     var maxTokens: Int
+    var thinking: ThinkingMode = .auto
 }
 
 final class ChatTask {
@@ -90,9 +91,8 @@ final class ChatClient {
         session = URLSession(configuration: configuration)
     }
 
-    /// DeepSeek V4 默认开启思考模式，会把 max_tokens 花在推理上；
-    /// 桌宠只要短回复，因此只在 DeepSeek 域名上显式关闭。
-    static func shouldDisableThinking(for url: URL) -> Bool {
+    /// DeepSeek 域名（thinking 参数只对它发送）。
+    static func isDeepSeek(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
         return host == "deepseek.com" || host.hasSuffix(".deepseek.com")
     }
@@ -109,6 +109,7 @@ final class ChatClient {
     @discardableResult
     func stream(messages: [ChatMessage],
                 config: ChatRequestConfig,
+                onReasoning: ((String) -> Void)? = nil,
                 onDelta: @escaping (String) -> Void,
                 completion: @escaping (Result<String, Error>) -> Void) -> ChatTask {
         let handle = ChatTask()
@@ -132,17 +133,23 @@ final class ChatClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        // DeepSeek 默认开启思考模式：思考会算进 max_tokens，额度太小就会「只有推理没有正文」。
+        // 所以只要思考是开着的，就给足预算。
+        let thinkingOn = Self.isDeepSeek(url) ? (config.thinking != .off) : false
+        let budget = thinkingOn ? max(config.maxTokens, 1600) : max(1, config.maxTokens)
         var payload: [String: Any] = [
             "model": model,
             "messages": messages.map { ["role": $0.role, "content": $0.content] },
             "stream": true,
             "temperature": min(max(config.temperature, 0), 2),
-            "max_tokens": max(1, config.maxTokens)
+            "max_tokens": budget
         ]
-        // DeepSeek V4 不传 thinking 时默认开启思考模式，会把 max_tokens 花在推理上，
-        // 桌宠只需要短回复，这里显式关掉；其他服务不传这个字段。
-        if Self.shouldDisableThinking(for: url) {
-            payload["thinking"] = ["type": "disabled"]
+        if Self.isDeepSeek(url) {
+            switch config.thinking {
+            case .off: payload["thinking"] = ["type": "disabled"]
+            case .on: payload["thinking"] = ["type": "enabled"]
+            case .auto: break
+            }
         }
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else {
             completion(.failure(ChatError.malformed))
@@ -186,12 +193,16 @@ final class ChatClient {
                     guard let choices = object["choices"] as? [[String: Any]],
                           let first = choices.first else { continue }
 
-                    if let delta = first["delta"] as? [String: Any],
-                       let text = delta["content"] as? String, !text.isEmpty {
-                        sawContent = true
-                        accumulated += text
-                        if accumulated.count > 120_000 { throw ChatError.emptyResponse }
-                        onDelta(text)
+                    if let delta = first["delta"] as? [String: Any] {
+                        if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
+                            onReasoning?(reasoning)
+                        }
+                        if let text = delta["content"] as? String, !text.isEmpty {
+                            sawContent = true
+                            accumulated += text
+                            if accumulated.count > 120_000 { throw ChatError.emptyResponse }
+                            onDelta(text)
+                        }
                     } else if let message = first["message"] as? [String: Any],
                               let text = message["content"] as? String, !text.isEmpty {
                         // 有些服务端在 stream=true 时直接返回整段 JSON。

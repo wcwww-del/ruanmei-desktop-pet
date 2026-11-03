@@ -92,8 +92,17 @@ enum MemoryEngine {
 
     // MARK: - 注入
 
+    /// 把当前时间告诉模型：否则问「今天周几」只能瞎猜。
+    static func currentTimeLine(_ now: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
+        return "【当前时间】\(formatter.string(from: now))（\(TimeZone.current.identifier)）。涉及日期、星期、时间的问题以此为准，不要猜。"
+    }
+
     static func systemPrompt(persona: Persona, memories: [ChatStore.Memory], summary: String?) -> String {
-        var parts = [persona.systemPrompt]
+        var parts = [persona.systemPrompt, currentTimeLine()]
         if let summary, !summary.isEmpty {
             parts.append("【之前聊天的提要】\n\(summary)")
         }

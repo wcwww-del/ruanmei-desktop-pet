@@ -16,6 +16,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var llmTemp: NSSlider!
     private var llmTempValue: NSTextField!
     private var llmMaxTokens: NSTextField!
+    private var llmThinking: NSPopUpButton!
     private var llmStatus: NSTextField!
 
     // 语音
@@ -195,13 +196,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let tempStack = NSStackView(views: [llmTemp, llmTempValue])
         tempStack.orientation = .horizontal
         tempStack.spacing = 8
-        llmMaxTokens = textField("400", width: 100)
+        llmMaxTokens = textField("1600", width: 100)
+
+        llmThinking = NSPopUpButton(frame: .zero, pullsDown: false)
+        llmThinking.controlSize = .small
+        llmThinking.addItems(withTitles: ThinkingMode.allCases.map { $0.title })
+        llmThinking.translatesAutoresizingMaskIntoConstraints = false
 
         llmStatus = statusLabel()
         let test = button("测试连接", #selector(testLLM))
         let hint = NSTextField(wrappingLabelWithString: """
-        Base URL 填到 /v1 这一级，程序会自己拼 /chat/completions。
+        Base URL 填到 /v1 这一级，程序会自己拼 /chat/completions（DeepSeek 直接填 https://api.deepseek.com）。
         只允许 https；本机地址（http://127.0.0.1:…）例外。API Key 保存在钥匙串。
+        DeepSeek：deepseek-v4-pro 更聪明，deepseek-flash 更快更便宜。思考模式默认跟随服务（DeepSeek 默认开启）；
+        开启思考时 max_tokens 至少按 1600 计，否则推理会把额度吃光。
         """)
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .tertiaryLabelColor
@@ -214,6 +222,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             row("模型", llmModel),
             row("温度", tempStack),
             row("最大 tokens", llmMaxTokens),
+            row("思考模式", llmThinking),
             test,
             llmStatus,
             hint
@@ -640,6 +649,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         llmTemp.doubleValue = llm.temperature
         llmTempValue.stringValue = String(format: "%.2f", llm.temperature)
         llmMaxTokens.stringValue = "\(llm.maxTokens)"
+        if let index = ThinkingMode.allCases.firstIndex(of: llm.thinking) {
+            llmThinking.selectItem(at: index)
+        } else {
+            llmThinking.selectItem(at: 0)
+        }
 
         let tts = config.config.tts
         ttsEnabled.state = tts.enabled ? .on : .off
@@ -693,7 +707,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         config.config.llm.baseURL = base
         config.config.llm.model = llmModel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         config.config.llm.temperature = llmTemp.doubleValue
-        config.config.llm.maxTokens = clamp(Int(llmMaxTokens.stringValue) ?? 400, 32, 4000)
+        config.config.llm.maxTokens = clamp(Int(llmMaxTokens.stringValue) ?? 1600, 32, 32_000)
+        let thinkingIndex = llmThinking.indexOfSelectedItem
+        config.config.llm.thinking = ThinkingMode.allCases.indices.contains(thinkingIndex)
+            ? ThinkingMode.allCases[thinkingIndex] : .auto
         var keychainError: String?
         if let error = config.setLLMKey(llmKey.stringValue) { keychainError = error }
 

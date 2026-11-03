@@ -28,6 +28,7 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
     private var sentenceStreamer = SentenceStreamer()
     private var extractInFlight = false
     private var summarizeInFlight = false
+    private var didShowThinking = false
     private var didLoadHistory = false
 
     // MARK: 回调
@@ -229,14 +230,23 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
         let history = store.recentMessages(limit: max(4, config.config.memory.historyTurns))
         let messages = buildMessages(userText: text, history: history, store: store)
         let llm = config.config.llm
+        didShowThinking = false
         let requestConfig = ChatRequestConfig(baseURL: llm.baseURL,
                                              apiKey: config.llmAPIKey,
                                              model: llm.model,
                                              temperature: config.activePersona.temperature ?? llm.temperature,
-                                             maxTokens: llm.maxTokens)
+                                             maxTokens: llm.maxTokens,
+                                             thinking: llm.thinking)
 
         task = client.stream(messages: messages,
                              config: requestConfig,
+                             onReasoning: { [weak self] _ in
+                                 DispatchQueue.main.async {
+                                     guard let self, self.streaming, !self.didShowThinking else { return }
+                                     self.didShowThinking = true
+                                     self.header.statusLabel.stringValue = "阮·梅正在思考…"
+                                 }
+                             },
                              onDelta: { [weak self] delta in
                                  DispatchQueue.main.async { self?.handleDelta(delta) }
                              },
