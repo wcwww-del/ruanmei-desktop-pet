@@ -201,7 +201,7 @@ final class ChatWindowController: NSWindowController, NSWindowDelegate {
         guard !text.isEmpty else { return }
 
         guard config.llmReady() else {
-            showNotice("还没有配置模型 API。点右上角齿轮，填好 Base URL、模型名和 API Key。")
+            showNotice("还没有配置模型 API。点右上角齿轮，填好 Base URL、模型名和 API Key，再点「保存并关闭」。")
             onOpenSettings?()
             return
         }

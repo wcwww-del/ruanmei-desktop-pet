@@ -185,9 +185,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     // MARK: 模型
 
     private func buildModelTab() -> NSView {
-        llmBaseURL = textField("https://api.deepseek.com/v1")
+        llmBaseURL = textField("https://api.deepseek.com")
         llmKey = secureField("sk-…")
-        llmModel = textField("deepseek-chat")
+        llmModel = textField("deepseek-flash")
         llmTemp = NSSlider(value: 0.85, minValue: 0, maxValue: 1.5, target: self, action: #selector(tempChanged))
         llmTemp.controlSize = .small
         llmTempValue = NSTextField(labelWithString: "0.85")
@@ -226,16 +226,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func testLLM() {
         tester?.cancel()
-        llmStatus.stringValue = "正在测试…"
-        let llm = ChatRequestConfig(baseURL: llmBaseURL.stringValue,
-                                    apiKey: llmKey.stringValue,
-                                    model: llmModel.stringValue,
-                                    temperature: 0,
-                                    maxTokens: 8)
-        guard EndpointPolicy.isAllowed(llm.baseURL) else {
+        let base = llmBaseURL.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = llmModel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = llmKey.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty, !model.isEmpty, !key.isEmpty else {
+            llmStatus.stringValue = "请先填写 Base URL、模型名和 API Key（灰字只是占位提示）"
+            return
+        }
+        guard EndpointPolicy.isAllowed(base) else {
             llmStatus.stringValue = "Base URL 只允许 https（本机 http 例外）"
             return
         }
+        llmStatus.stringValue = "正在测试…"
+        let llm = ChatRequestConfig(baseURL: base, apiKey: key, model: model,
+                                    temperature: 0.7, maxTokens: 256)
+        let started = Date()
         tester = ChatClient.shared.complete(
             messages: [ChatMessage(role: "system", content: "你是连接测试。"),
                        ChatMessage(role: "user", content: "ping")],
@@ -244,9 +249,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 guard let self else { return }
                 switch result {
                 case .success:
-                    self.llmStatus.stringValue = "连接成功：\(llm.model)"
+                    let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
+                    self.llmStatus.stringValue = "连接成功：\(model)（\(seconds)s）· 点「保存并关闭」才会生效"
                 case .failure(let error):
-                    self.llmStatus.stringValue = "失败：\(error.localizedDescription)"
+                    let message = error.localizedDescription
+                    self.llmStatus.stringValue = "失败：\(message)"
+                    let alert = NSAlert()
+                    alert.messageText = "测试连接失败"
+                    alert.informativeText = """
+                    \(message)
+
+                    请求地址：\(ChatClient.endpoint(base, path: "/chat/completions")?.absoluteString ?? base)
+                    模型：\(model)
+                    """
+                    alert.addButton(withTitle: "好")
+                    alert.runModal()
                 }
             }
         }

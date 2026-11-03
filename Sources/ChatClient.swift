@@ -9,6 +9,7 @@ enum ChatError: LocalizedError {
     case emptyResponse
     case cancelled
     case malformed
+    case missingModel
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +17,8 @@ enum ChatError: LocalizedError {
             return "接口地址无效：\(url)"
         case .missingKey:
             return "还没有填写 API Key"
+        case .missingModel:
+            return "还没有填写模型名（DeepSeek 填 deepseek-flash）"
         case .http(let code, let message):
             switch code {
             case 401, 403: return "鉴权失败（\(code)）：请检查 API Key。\(message)"
@@ -87,6 +90,13 @@ final class ChatClient {
         session = URLSession(configuration: configuration)
     }
 
+    /// DeepSeek V4 默认开启思考模式，会把 max_tokens 花在推理上；
+    /// 桌宠只要短回复，因此只在 DeepSeek 域名上显式关闭。
+    static func shouldDisableThinking(for url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "deepseek.com" || host.hasSuffix(".deepseek.com")
+    }
+
     static func endpoint(_ base: String, path: String) -> URL? {
         var trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
         while trimmed.hasSuffix("/") { trimmed.removeLast() }
@@ -102,8 +112,14 @@ final class ChatClient {
                 onDelta: @escaping (String) -> Void,
                 completion: @escaping (Result<String, Error>) -> Void) -> ChatTask {
         let handle = ChatTask()
-        guard !config.apiKey.isEmpty else {
+        let key = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
             completion(.failure(ChatError.missingKey))
+            return handle
+        }
+        guard !model.isEmpty else {
+            completion(.failure(ChatError.missingModel))
             return handle
         }
         guard let url = Self.endpoint(config.baseURL, path: "/chat/completions") else {
@@ -115,14 +131,19 @@ final class ChatClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
-        let payload: [String: Any] = [
-            "model": config.model,
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        var payload: [String: Any] = [
+            "model": model,
             "messages": messages.map { ["role": $0.role, "content": $0.content] },
             "stream": true,
-            "temperature": config.temperature,
-            "max_tokens": config.maxTokens
+            "temperature": min(max(config.temperature, 0), 2),
+            "max_tokens": max(1, config.maxTokens)
         ]
+        // DeepSeek V4 不传 thinking 时默认开启思考模式，会把 max_tokens 花在推理上，
+        // 桌宠只需要短回复，这里显式关掉；其他服务不传这个字段。
+        if Self.shouldDisableThinking(for: url) {
+            payload["thinking"] = ["type": "disabled"]
+        }
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else {
             completion(.failure(ChatError.malformed))
             return handle
