@@ -23,24 +23,13 @@ enum PetSecurity {
 
     // MARK: - 文本
 
-    /// 聊天输入的上限（比气泡文案宽一些）。
-    static let maxChatCharacters = 2000
-
-    static func sanitizeBubbleText(_ text: String) -> String {
-        sanitize(text, limit: maxBubbleCharacters)
-    }
-
-    static func sanitizeChatText(_ text: String) -> String {
-        sanitize(text, limit: maxChatCharacters)
-    }
-
     /// 去掉控制字符、压缩连续换行、限制长度。
-    private static func sanitize(_ text: String, limit: Int) -> String {
+    static func sanitizeBubbleText(_ text: String) -> String {
         var out = String()
-        out.reserveCapacity(min(text.count, limit))
+        out.reserveCapacity(min(text.count, maxBubbleCharacters))
         var lastWasNewline = false
         for scalar in text.unicodeScalars {
-            if out.count >= limit { break }
+            if out.count >= maxBubbleCharacters { break }
             if scalar == "\n" {
                 if lastWasNewline { continue }
                 lastWasNewline = true
